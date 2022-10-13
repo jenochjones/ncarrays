@@ -1,0 +1,14 @@
+LICENSE
+README.md
+pyproject.toml
+setup.cfg
+ncarrays/__init__.py
+ncarrays/_coordinate_system.py
+ncarrays/_geospatial_functions.py
+ncarrays/_ncarrays.py
+ncarrays/_post_processing.py
+ncarrays/_variable_interpretation.py
+ncarrays.egg-info/PKG-INFO
+ncarrays.egg-info/SOURCES.txt
+ncarrays.egg-info/dependency_links.txt
+ncarrays.egg-info/top_level.txt

@@ -1,0 +1,1 @@
+from ncarrays._ncarrays import ARRAY, convert_shapefile_to_geojson__all__ = ['ARRAY', 'convert_shapefile_to_geojson', ]__author__ = 'J Enoch Jones'__docs__ = ''__doi__ = ''__license__ = 'MIT License'__source_code__ = ''__version__ = '0.0.6'
