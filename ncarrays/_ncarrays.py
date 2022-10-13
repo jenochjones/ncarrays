@@ -1,6 +1,7 @@
 import netCDF4
 import numpy
 import geopandas
+from urllib.parse import urlparse
 
 from ._geospatial_functions import _geojson_to_raster
 from ._post_processing import _get_statistics, _add_dimensional_axis, _scale_and_add_offset
@@ -9,8 +10,23 @@ from ._variable_interpretation import _determine_variable_types, _retrieve_sub_v
 
 class ARRAY:
     def __init__(self, opendap_url: str, variable: str or list):
-        main_variable = netCDF4.Dataset(opendap_url + '?' + variable).variables[variable]
-        variables, variable_type_lists = _retrieve_sub_variables(opendap_url, main_variable)
+        parameters_dict = {}
+
+        if '?' in opendap_url:
+            parsed_url = urlparse(opendap_url)
+            opendap_url = f'{parsed_url[0]}://{parsed_url[1]}{parsed_url[2]}'
+            url_parameters = parsed_url[4].split(',')
+            for param in url_parameters:
+                split_param = param.split('[', 1)
+                parameters_dict[split_param[0]] = f'[{split_param[1]}'
+
+        if variable in parameters_dict:
+            opendap_url_with_params = f'{opendap_url}?{variable}{parameters_dict[variable]}'
+        else:
+            opendap_url_with_params = opendap_url + '?' + variable
+
+        main_variable = netCDF4.Dataset(opendap_url_with_params).variables[variable]
+        variables, variable_type_lists = _retrieve_sub_variables(opendap_url, main_variable, parameters_dict)
         variables[variable] = {'dataset': main_variable, 'datatype': 'D'}
 
         variables = _determine_variable_types(variables, variable_type_lists)
@@ -22,14 +38,15 @@ class ARRAY:
         for dim in dim_order:
             if variables[dim]['datatype'] == 'Y':
                 y_dim = variables[dim]['dataset'][:]
-                # _scale_and_add_offset(variables[dim]['dataset'], variables[dim]['dataset'][:])
+                _scale_and_add_offset(variables[dim]['dataset'], variables[dim]['dataset'][:])
             elif variables[dim]['datatype'] == 'X':
                 x_dim = variables[dim]['dataset'][:]
-                # _scale_and_add_offset(variables[dim]['dataset'], variables[dim]['dataset'][:])
+                _scale_and_add_offset(variables[dim]['dataset'], variables[dim]['dataset'][:])
 
         self.dim_order = dim_order
         self.main_variable = main_variable
         self.opendap_url = opendap_url
+        self.url_params = parameters_dict
         self.variable = variable
         self.variable_type_lists = variable_type_lists
         self.variables = variables
@@ -47,10 +64,15 @@ class ARRAY:
         else:
             self.grid_mapping_variable = None
 
-    def get_series(self, path_to_geojson: str or None = None, axis: list or str = [], statistic: str = 'mean',
+    def get_series(self, path_to_geojson: str or None = None, axis: str or None = None, statistic: str = 'mean',
                    datetime_to_string: bool = True, datetime_format: str = '%m-%d-%Y %H:%M:%S'):
         subset_for_main_variable = []
         axis_dimension_type = None
+
+        if axis is None:
+            for variable in self.variables:
+                if self.variables[variable]['datatype'] == 'T':
+                    axis = variable
 
         if path_to_geojson is not None:
             if len(self.y_dim) >= 0 or len(self.x_dim) >= 0:
@@ -93,33 +115,59 @@ class ARRAY:
                 dim_type_order = []
 
                 for dim in self.dim_order:
-                    print(dim)
                     dim_type_order.append(self.variables[dim]['datatype'])
 
                     if self.variables[dim]['datatype'] == 'Y':
                         self.y_dim = self.variables[dim]['dataset'][:]
                         array_shape_for_tile.append(1)
-                        subset_for_main_variable.append(slice(extents[0], extents[1], 1))
+                        if dim in self.url_params:
+                            slice_numbers = self.url_params[dim][1:-1].split(':')
+                            if len(slice_numbers) >= 3:
+                                jump_number = int(slice_numbers[1])
+                            else:
+                                jump_number = 1
+                            subset_for_main_variable.append(slice(extents[0], extents[1], jump_number))
+                        else:
+                            subset_for_main_variable.append(slice(extents[0], extents[1], 1))
                     elif self.variables[dim]['datatype'] == 'X':
                         self.x_dim = self.variables[dim]['dataset'][:]
                         array_shape_for_tile.append(1)
-                        subset_for_main_variable.append(slice(extents[2], extents[3], 1))
+                        if dim in self.url_params:
+                            slice_numbers = self.url_params[dim][1:-1].split(':')
+                            if len(slice_numbers) >= 3:
+                                jump_number = int(slice_numbers[1])
+                            else:
+                                jump_number = 1
+                            subset_for_main_variable.append(slice(extents[2], extents[3], jump_number))
+                        else:
+                            subset_for_main_variable.append(slice(extents[2], extents[3], 1))
                     else:
-                        # if dim in dimensional_values:
-                        #     subset_for_main_variable.append(dimensional_values[dim])
-                        #
-                        #     if isinstance(dimensional_values[dim], int):
-                        #         array_shape_for_tile.append(1)
-                        #     elif isinstance(dimensional_values[dim], slice):
-                        #         array_shape_for_tile.append(len(self.variables[dim]['dataset'][dimensional_values[dim]]))
-                        #     else:
-                        #         array_shape_for_tile.append(len(self.variables[dim]['dataset'][:]))
-                        # else:
-                        subset_for_main_variable.append(slice(None, None, 1))
+                        if dim in self.url_params:
+                            slice_numbers = self.url_params[dim][1:-1].split(':')
+                            if len(slice_numbers) >= 3:
+                                first_number = int(slice_numbers[0])
+                                jump_number = int(slice_numbers[1])
+                                second_number = int(slice_numbers[2]) + 1
+                            elif len(slice_numbers) == 2:
+                                first_number = int(slice_numbers[0])
+                                jump_number = 1
+                                second_number = int(slice_numbers[1]) + 1
+                            elif len(slice_numbers) == 1:
+                                first_number = int(slice_numbers[0])
+                                jump_number = 1
+                                second_number = None
+                            else:
+                                first_number = None
+                                jump_number = 1
+                                second_number = None
+                            subset_for_main_variable.append(slice(first_number, second_number, jump_number))
+                        else:
+                            subset_for_main_variable.append(slice(None, None, 1))
+
                         array_shape_for_tile.append(len(self.variables[dim]['dataset'][:]))
 
             array_shape_for_tile = tuple(array_shape_for_tile)
-            dim_type_order = tuple(dim_type_order)
+            # dim_type_order = tuple(dim_type_order)
             subset_for_main_variable = tuple(subset_for_main_variable)
 
             sub_main_array = self.main_variable[subset_for_main_variable]
@@ -146,9 +194,6 @@ class ARRAY:
                     if dim == self.axis:
                         axis_dimension_type = self.variables[dim]['datatype']
 
-                # if dim in dimensional_values:
-                #     subset_for_main_variable.append(dimensional_values[dim])
-                # else:
                 subset_for_main_variable.append(slice(None, None, 1))
 
             subset_for_main_variable = tuple(subset_for_main_variable)
@@ -169,9 +214,7 @@ class ARRAY:
                 axis_name = axis[0]
             else:
                 axis_name = axis
-            # if axis_name in dimensional_values:
-            #     axis_dimension_values = self.variables[axis_name]['dataset'][dimensional_values[axis_name]]
-            # else:
+
             if len(self.variables[axis_name]['dataset'].shape) == 0:
                 axis_dimension_values = self.variables[axis_name]['dataset']
             else:

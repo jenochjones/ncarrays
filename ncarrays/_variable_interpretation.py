@@ -50,9 +50,12 @@ def _determine_variable_types(variables, variable_type_lists):
     return variables
 
 
-def _retrieve_sub_variables(opendap_url, main_variable):
+def _retrieve_sub_variables(opendap_url, main_variable, parameters_dict):
     def add_variables_to_url(partial_url, variable):
-        partial_url += variable + ','
+        if variable in parameters_dict:
+            partial_url += variable + parameters_dict[variable] + ','
+        else:
+            partial_url += variable + ','
         return partial_url
 
     other_variables = {
